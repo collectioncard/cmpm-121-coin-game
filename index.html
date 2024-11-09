@@ -3,10 +3,20 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CMPM 121 Coin Game</title>
   </head>
   <body>
     <div id="app">
-      <!-- todo -->
+      <div id="userControls">
+        <button id="toggleGPS">Toggle GPS</button>
+        <button id="north" title="north">⬆️</button>
+        <button id="south" title="south">⬇️</button>
+        <button id="west" title="west">⬅️</button>
+        <button id="east" title="east">➡️</button>
+        <button id="reset" title="reset">♻️</button>
+      </div>
+      <div id="statusPanel"></div>
+      <div id="map"></div>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
