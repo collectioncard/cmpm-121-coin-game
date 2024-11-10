@@ -16,6 +16,7 @@ const GAMEPLAY_ZOOM_LEVEL = 19;
 const TILE_DEGREES = 1e-4;
 const NEIGHBORHOOD_SIZE = 8;
 const CACHE_SPAWN_PROBABILITY = 0.1;
+const MOVE_STEP = 1e-4;
 
 // Location of our classroom (as identified on Google Maps)
 const PLAYER_START = { x: 36.98949379578401, y: -122.06277128548504 };
@@ -65,7 +66,7 @@ leaflet.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
 // Add layer for cache markers
 const cacheLayerGroup = leaflet.layerGroup().addTo(map);
 
-const _playerMarker = leaflet.marker(
+const playerMarker = leaflet.marker(
   leaflet.latLng(PLAYER_START.x, PLAYER_START.y),
 )
   .bindTooltip("That's you!")
@@ -187,6 +188,32 @@ function toMapCoordinates(position: Vector2): Vector2 {
     x: Math.floor(position.x / TILE_DEGREES),
     y: Math.floor(position.y / TILE_DEGREES),
   };
+}
+
+////**** Player Movement ****////
+document.getElementById("north")!.addEventListener(
+  "click",
+  () => movePlayer(0, MOVE_STEP),
+);
+document.getElementById("south")!.addEventListener(
+  "click",
+  () => movePlayer(0, -MOVE_STEP),
+);
+document.getElementById("west")!.addEventListener(
+  "click",
+  () => movePlayer(-MOVE_STEP, 0),
+);
+document.getElementById("east")!.addEventListener(
+  "click",
+  () => movePlayer(MOVE_STEP, 0),
+);
+
+function movePlayer(dx: number, dy: number) {
+  const newLat = playerMarker.getLatLng().lat + dy;
+  const newLng = playerMarker.getLatLng().lng + dx;
+  playerMarker.setLatLng([newLat, newLng]);
+  map.setView([newLat, newLng], GAMEPLAY_ZOOM_LEVEL);
+  generateAroundPlayer({ x: newLat, y: newLng });
 }
 
 ////**** Game Logic ****////
