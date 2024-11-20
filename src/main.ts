@@ -26,21 +26,58 @@ interface Vector2 {
   y: number;
 }
 
-type CoinCache = {
-  inventory: Coin[];
-  last_coin: number;
-  mints_remaining: number;
-  leaveCoin: (coin: Coin) => void;
-  takeCoin: () => Coin | undefined;
-};
-
 type Coin = {
   origin: Vector2;
   coin_number: number;
 };
 
-const cacheData = new Map<string, CoinCache>();
+interface Momento<T> {
+  toMomento(): T;
+  fromMomento(momento: T): void;
+}
+
+class CoinCache implements Momento<string> {
+  inventory: Coin[];
+  last_coin: number;
+  mints_remaining: number;
+  position: Vector2;
+
+  constructor(totalMints: number = 0, position: Vector2 = { x: 0, y: 0 }) {
+    this.inventory = [];
+    this.last_coin = 0;
+    this.mints_remaining = totalMints;
+    this.position = position;
+  }
+
+  leaveCoin(coin: Coin) {
+    this.inventory.push(coin);
+  }
+
+  takeCoin(): Coin | undefined {
+    if (this.inventory.length) return this.inventory.pop()!;
+    if (this.mints_remaining > 0) {
+      this.mints_remaining--;
+      return { origin: this.position, coin_number: this.last_coin++ };
+    }
+    return undefined;
+  }
+
+  fromMomento(momento: string): void {
+    const parsedMomento = JSON.parse(momento);
+    this.inventory = parsedMomento.inventory;
+    this.last_coin = parsedMomento.last_coin;
+    this.mints_remaining = parsedMomento.mints_remaining;
+    this.position = parsedMomento.position;
+  }
+
+  toMomento(): string {
+    return JSON.stringify(this);
+  }
+}
+
 const playerCoins: Coin[] = [];
+
+const momentos = new Map<string, string>();
 
 ////**** Page Content ****////
 const statusPanel = document.querySelector<HTMLDivElement>("#statusPanel")!;
@@ -115,6 +152,10 @@ function handleDeposit(coinCache: CoinCache, cachePopup: HTMLElement) {
   if (playerCoins.length > 0) {
     coinCache.leaveCoin(playerCoins.pop()!);
     updateDisplay(cachePopup, coinCache);
+    momentos.set(
+      `${coinCache.position.x},${coinCache.position.y}`,
+      coinCache.toMomento(),
+    );
   }
 }
 
@@ -123,6 +164,10 @@ function handleCollect(coinCache: CoinCache, cachePopup: HTMLElement) {
   if (coin) {
     playerCoins.push(coin);
     updateDisplay(cachePopup, coinCache);
+    momentos.set(
+      `${coinCache.position.x},${coinCache.position.y}`,
+      coinCache.toMomento(),
+    );
   }
 }
 
@@ -141,27 +186,14 @@ function updateDisplay(cachePopup: HTMLElement, coinCache: CoinCache) {
 function getOrCreateCache(position: Vector2): CoinCache {
   const posKey = `${position.x},${position.y}`;
 
-  if (!cacheData.has(posKey)) {
-    const newCache: CoinCache = {
-      inventory: [],
-      last_coin: 0,
-      mints_remaining: Math.floor(luck(posKey) * 100),
-      leaveCoin: function (coin) {
-        this.inventory.push(coin);
-      },
-      takeCoin: function (): Coin | undefined {
-        if (this.inventory.length) return this.inventory.pop()!;
-        if (this.mints_remaining > 0) {
-          this.mints_remaining--;
-          return { origin: position, coin_number: this.last_coin++ };
-        }
-        return undefined;
-      },
-    };
-    cacheData.set(posKey, newCache);
+  if (!momentos.has(posKey)) {
+    const newCache = new CoinCache(Math.floor(luck(posKey) * 100), position);
+    momentos.set(posKey, newCache.toMomento());
   }
 
-  return cacheData.get(posKey)!;
+  const cache = new CoinCache();
+  cache.fromMomento(momentos.get(posKey)!);
+  return cache;
 }
 
 function generateAroundPlayer(position: Vector2) {
