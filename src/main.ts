@@ -109,6 +109,16 @@ const playerMarker = leaflet.marker(
   .bindTooltip("That's you!")
   .addTo(map);
 
+// Add player path
+const playerPath: leaflet.LatLng[] = [
+  leaflet.latLng(PLAYER_START.x, PLAYER_START.y),
+];
+
+// Create a polyline object and add it to the map
+const playerPolyline = leaflet.polyline(playerPath, { color: "green" }).addTo(
+  map,
+);
+
 ////**** Coin Cache Logic ****////
 
 function spawnCoinCache(position: Vector2) {
@@ -148,6 +158,47 @@ function createPopup(position: Vector2): leaflet.Content {
   return cachePopup;
 }
 
+// Save momentos to localStorage
+function saveGame() {
+  localStorage.setItem(
+    "momentos",
+    JSON.stringify(Array.from(momentos.entries())),
+  );
+  localStorage.setItem("playerPath", JSON.stringify(playerPath));
+  localStorage.setItem("playerCoins", JSON.stringify(playerCoins));
+}
+
+// Load momentos from localStorage
+function loadGame() {
+  const storedMomentos = localStorage.getItem("momentos");
+  if (storedMomentos) {
+    const parsedMomentos = new Map<string, string>(JSON.parse(storedMomentos));
+    parsedMomentos.forEach((value, key) => {
+      momentos.set(key, value);
+    });
+  }
+
+  const storedPlayerPath = localStorage.getItem("playerPath");
+  if (storedPlayerPath) {
+    const parsedPlayerPath = JSON.parse(storedPlayerPath);
+    parsedPlayerPath.forEach((pos: { lat: number; lng: number }) => {
+      playerPath.push(leaflet.latLng(pos.lat, pos.lng));
+    });
+    playerPolyline.setLatLngs(playerPath);
+  }
+
+  const storedPlayerCoins = localStorage.getItem("playerCoins");
+  if (storedPlayerCoins) {
+    const parsedPlayerCoins = JSON.parse(storedPlayerCoins);
+    parsedPlayerCoins.forEach((coin: Coin) => {
+      playerCoins.push(coin);
+    });
+  }
+
+  updateDisplay(statusPanel);
+}
+
+// Update the handleDeposit and handleCollect functions to save momentos
 function handleDeposit(coinCache: CoinCache, cachePopup: HTMLElement) {
   if (playerCoins.length > 0) {
     coinCache.leaveCoin(playerCoins.pop()!);
@@ -156,6 +207,7 @@ function handleDeposit(coinCache: CoinCache, cachePopup: HTMLElement) {
       `${coinCache.position.x},${coinCache.position.y}`,
       coinCache.toMomento(),
     );
+    saveGame();
   }
 }
 
@@ -168,19 +220,46 @@ function handleCollect(coinCache: CoinCache, cachePopup: HTMLElement) {
       `${coinCache.position.x},${coinCache.position.y}`,
       coinCache.toMomento(),
     );
+    saveGame();
   }
 }
 
 ////**** Helper Functions ****////
 
-function updateDisplay(cachePopup: HTMLElement, coinCache: CoinCache) {
-  const coinList = playerCoins.map((coin) =>
-    `${coin.origin.x}:${coin.origin.y}#${coin.coin_number}`
+function updateDisplay(
+  cachePopup: HTMLElement,
+  coinCache: CoinCache | null = null,
+) {
+  const coinList = playerCoins.map((coin, index) =>
+    `<span class="coin-identifier" data-index="${index}">${coin.origin.x}:${coin.origin.y}#${coin.coin_number}</span>`
   ).join("<br>");
   statusPanel.innerHTML = `Collected Coins:<br>${coinList}`;
 
+  // Add event listeners to coin identifiers
+  document.querySelectorAll(".coin-identifier").forEach((element) => {
+    element.addEventListener("click", (event) => {
+      const index = (event.target as HTMLElement).dataset.index;
+      if (index !== undefined) {
+        const coin = playerCoins[parseInt(index)];
+        const cachePosition = { x: coin.origin.x, y: coin.origin.y };
+        console.log("Centering map on cache at", cachePosition);
+        centerMapOnCache(cachePosition);
+      }
+    });
+  });
+
+  if (coinCache === null) return;
+
   cachePopup.querySelector("#count")!.textContent =
     (coinCache.mints_remaining + coinCache.inventory.length).toString();
+}
+
+function centerMapOnCache(position: Vector2) {
+  const cacheLatLng = leaflet.latLng(
+    position.x * TILE_DEGREES,
+    position.y * TILE_DEGREES,
+  );
+  map.setView(cacheLatLng, GAMEPLAY_ZOOM_LEVEL);
 }
 
 function getOrCreateCache(position: Vector2): CoinCache {
@@ -240,14 +319,56 @@ document.getElementById("east")!.addEventListener(
   () => movePlayer(MOVE_STEP, 0),
 );
 
+document.getElementById("toggleGPS")!.addEventListener("click", enableGPS);
+
+function enableGPS() {
+  if (navigator.geolocation) {
+    navigator.geolocation.watchPosition(
+      (position) => {
+        const { latitude, longitude } = position.coords;
+        movePlayerToLocation(latitude, longitude);
+      },
+      (error) => {
+        console.error("Error getting geolocation: ", error);
+      },
+      {
+        enableHighAccuracy: true,
+      },
+    );
+  } else {
+    console.error("Geolocation is not supported by this browser.");
+  }
+}
+
 function movePlayer(dx: number, dy: number) {
-  const newLat = playerMarker.getLatLng().lat + dy;
-  const newLng = playerMarker.getLatLng().lng + dx;
-  playerMarker.setLatLng([newLat, newLng]);
-  map.setView([newLat, newLng], GAMEPLAY_ZOOM_LEVEL);
-  generateAroundPlayer({ x: newLat, y: newLng });
+  movePlayerToLocation(
+    playerMarker.getLatLng().lat + dy,
+    playerMarker.getLatLng().lng + dx,
+  );
+}
+
+function movePlayerToLocation(lat: number, lng: number) {
+  const newPos = leaflet.latLng(lat, lng);
+
+  playerPath.push(newPos);
+  playerPolyline.setLatLngs(playerPath);
+
+  playerMarker.setLatLng(newPos);
+  map.setView(newPos, GAMEPLAY_ZOOM_LEVEL);
+  generateAroundPlayer({ x: lat, y: lng });
+}
+
+//// *** Reset Game *** ////
+document.getElementById("reset")!.addEventListener("click", resetGame);
+
+function resetGame() {
+  //prompt user for confirmation
+  if (!confirm("Are you sure you want to reset the game?")) return;
+
+  localStorage.clear();
+  location.reload();
 }
 
 ////**** Game Logic ****////
-
+loadGame();
 generateAroundPlayer(PLAYER_START);
