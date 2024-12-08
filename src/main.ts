@@ -11,6 +11,9 @@ import "./leafletWorkaround.ts";
 // Deterministic random number generator
 import luck from "./luck.ts";
 
+import { CoinCache } from "./coinCache.ts";
+import { Coin, Vector2 } from "./types.ts";
+
 // Tunable gameplay parameters
 const GAMEPLAY_ZOOM_LEVEL = 19;
 const TILE_DEGREES = 1e-4;
@@ -21,58 +24,9 @@ const MOVE_STEP = 1e-4;
 // Location of our classroom (as identified on Google Maps)
 const PLAYER_START = { x: 36.98949379578401, y: -122.06277128548504 };
 
-interface Vector2 {
-  x: number;
-  y: number;
-}
-
-type Coin = {
-  origin: Vector2;
-  coin_number: number;
-};
-
 interface Momento<T> {
   toMomento(): T;
   fromMomento(momento: T): void;
-}
-
-class CoinCache implements Momento<string> {
-  inventory: Coin[];
-  last_coin: number;
-  mints_remaining: number;
-  position: Vector2;
-
-  constructor(totalMints: number = 0, position: Vector2 = { x: 0, y: 0 }) {
-    this.inventory = [];
-    this.last_coin = 0;
-    this.mints_remaining = totalMints;
-    this.position = position;
-  }
-
-  leaveCoin(coin: Coin) {
-    this.inventory.push(coin);
-  }
-
-  takeCoin(): Coin | undefined {
-    if (this.inventory.length) return this.inventory.pop()!;
-    if (this.mints_remaining > 0) {
-      this.mints_remaining--;
-      return { origin: this.position, coin_number: this.last_coin++ };
-    }
-    return undefined;
-  }
-
-  fromMomento(momento: string): void {
-    const parsedMomento = JSON.parse(momento);
-    this.inventory = parsedMomento.inventory;
-    this.last_coin = parsedMomento.last_coin;
-    this.mints_remaining = parsedMomento.mints_remaining;
-    this.position = parsedMomento.position;
-  }
-
-  toMomento(): string {
-    return JSON.stringify(this);
-  }
 }
 
 const playerCoins: Coin[] = [];
