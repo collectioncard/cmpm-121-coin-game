@@ -345,6 +345,7 @@ function movePlayer(dx: number, dy: number) {
     playerMarker.getLatLng().lat + dy,
     playerMarker.getLatLng().lng + dx,
   );
+  saveGame();
 }
 
 function movePlayerToLocation(lat: number, lng: number) {
