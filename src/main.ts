@@ -24,135 +24,138 @@ const MOVE_STEP = 1e-4;
 // Location of our classroom (as identified on Google Maps)
 const PLAYER_START = { x: 36.98949379578401, y: -122.06277128548504 };
 
-interface Momento<T> {
-  toMomento(): T;
-  fromMomento(momento: T): void;
-}
-
 const playerCoins: Coin[] = [];
-
 const momentos = new Map<string, string>();
+
+//encapsulate leaflet map logic
+class mapData {
+  map: leaflet.Map;
+  playerMarker: leaflet.Marker;
+  playerPolyline: leaflet.Polyline;
+  cacheLayerGroup: leaflet.LayerGroup;
+
+  constructor(containerId: string, playerStart: { x: number; y: number }) {
+    this.map = leaflet.map(document.getElementById(containerId)!, {
+      center: leaflet.latLng(playerStart.x, playerStart.y),
+      zoom: GAMEPLAY_ZOOM_LEVEL,
+      minZoom: GAMEPLAY_ZOOM_LEVEL,
+      maxZoom: GAMEPLAY_ZOOM_LEVEL,
+      zoomControl: false,
+      scrollWheelZoom: false,
+    });
+
+    leaflet.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution:
+        '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    }).addTo(this.map);
+
+    this.cacheLayerGroup = leaflet.layerGroup().addTo(this.map);
+
+    // Initialize the player marker at the start position
+    this.playerMarker = leaflet.marker(
+      leaflet.latLng(playerStart.x, playerStart.y),
+    )
+      .bindTooltip("That's you!")
+      .addTo(this.map);
+
+    const playerPath: leaflet.LatLng[] = [
+      leaflet.latLng(playerStart.x, playerStart.y),
+    ];
+
+    this.playerPolyline = leaflet.polyline(playerPath, { color: "green" })
+      .addTo(
+        this.map,
+      );
+  }
+
+  centerMapOnCache(position: Vector2) {
+    const cacheLatLng = leaflet.latLng(
+      position.x * TILE_DEGREES,
+      position.y * TILE_DEGREES,
+    );
+    this.map.setView(cacheLatLng, GAMEPLAY_ZOOM_LEVEL);
+  }
+
+  movePlayerToLocation(lat: number, lng: number) {
+    const newPos = leaflet.latLng(lat, lng);
+
+    // Move player marker to new position
+    this.playerMarker.setLatLng(newPos);
+    this.playerPolyline.addLatLng(newPos);
+
+    // Recenter map around new player position
+    this.map.setView(newPos, GAMEPLAY_ZOOM_LEVEL);
+  }
+
+  createPopup(position: Vector2): leaflet.Content {
+    const coinCache = getOrCreateCache(position);
+    const cachePopup = document.createElement("div");
+
+    cachePopup.innerHTML = `
+        Position (${position.x},${position.y}) <br>
+        Coins Remaining: <span id="count">${
+      coinCache.mints_remaining + coinCache.inventory.length
+    }</span> <br>
+        <button id="collect">Collect</button> <button id="deposit">Deposit</button>
+    `;
+
+    cachePopup.querySelector("#deposit")!.addEventListener(
+      "click",
+      () => handleDeposit(coinCache, cachePopup),
+    );
+    cachePopup.querySelector("#collect")!.addEventListener(
+      "click",
+      () => handleCollect(coinCache, cachePopup),
+    );
+
+    return cachePopup;
+  }
+
+  spawnCoinCache(position: Vector2) {
+    const originLat = position.x * TILE_DEGREES;
+    const originLng = position.y * TILE_DEGREES;
+    const cacheBounds = leaflet.latLngBounds(
+      [originLat, originLng],
+      [originLat + TILE_DEGREES, originLng + TILE_DEGREES],
+    );
+
+    leaflet.rectangle(cacheBounds, { color: "green", weight: 1 })
+      .bindPopup(this.createPopup(position))
+      .addTo(this.cacheLayerGroup);
+  }
+
+  generateAroundPlayer(position: Vector2) {
+    const playerMapPos = toMapCoordinates(position);
+    this.cacheLayerGroup.clearLayers();
+
+    for (
+      let x = playerMapPos.x - NEIGHBORHOOD_SIZE;
+      x < playerMapPos.x + NEIGHBORHOOD_SIZE;
+      x++
+    ) {
+      for (
+        let y = playerMapPos.y - NEIGHBORHOOD_SIZE;
+        y < playerMapPos.y + NEIGHBORHOOD_SIZE;
+        y++
+      ) {
+        if (luck(`${x},${y}`) < CACHE_SPAWN_PROBABILITY) {
+          this.spawnCoinCache({ x, y });
+        }
+      }
+    }
+  }
+}
 
 ////**** Page Content ****////
 const statusPanel = document.querySelector<HTMLDivElement>("#statusPanel")!;
 statusPanel.innerHTML = "No coins yet...";
 
-// Initialize the map
-const map = leaflet.map(document.getElementById("map")!, {
-  center: leaflet.latLng(PLAYER_START.x, PLAYER_START.y),
-  zoom: GAMEPLAY_ZOOM_LEVEL,
-  minZoom: GAMEPLAY_ZOOM_LEVEL,
-  maxZoom: GAMEPLAY_ZOOM_LEVEL,
-  zoomControl: false,
-  scrollWheelZoom: false,
-});
-
-// Add layer for OpenStreetMap tiles
-leaflet.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-  maxZoom: 19,
-  attribution:
-    '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-}).addTo(map);
-
-// Add layer for cache markers
-const cacheLayerGroup = leaflet.layerGroup().addTo(map);
-
-const playerMarker = leaflet.marker(
-  leaflet.latLng(PLAYER_START.x, PLAYER_START.y),
-)
-  .bindTooltip("That's you!")
-  .addTo(map);
-
-// Add player path
-const playerPath: leaflet.LatLng[] = [
-  leaflet.latLng(PLAYER_START.x, PLAYER_START.y),
-];
-
-// Create a polyline object and add it to the map
-const playerPolyline = leaflet.polyline(playerPath, { color: "green" }).addTo(
-  map,
-);
+// Create map instance
+const leafletMap = new mapData("map", PLAYER_START);
 
 ////**** Coin Cache Logic ****////
 
-function spawnCoinCache(position: Vector2) {
-  const originLat = position.x * TILE_DEGREES;
-  const originLng = position.y * TILE_DEGREES;
-  const cacheBounds = leaflet.latLngBounds(
-    [originLat, originLng],
-    [originLat + TILE_DEGREES, originLng + TILE_DEGREES],
-  );
-
-  leaflet.rectangle(cacheBounds, { color: "green", weight: 1 })
-    .bindPopup(createPopup(position))
-    .addTo(cacheLayerGroup);
-}
-
-function createPopup(position: Vector2): leaflet.Content {
-  const coinCache = getOrCreateCache(position);
-  const cachePopup = document.createElement("div");
-
-  cachePopup.innerHTML = `
-        Position (${position.x},${position.y}) <br>
-        Coins Remaining: <span id="count">${
-    coinCache.mints_remaining + coinCache.inventory.length
-  }</span> <br>
-        <button id="collect">Collect</button> <button id="deposit">Deposit</button>
-    `;
-
-  cachePopup.querySelector("#deposit")!.addEventListener(
-    "click",
-    () => handleDeposit(coinCache, cachePopup),
-  );
-  cachePopup.querySelector("#collect")!.addEventListener(
-    "click",
-    () => handleCollect(coinCache, cachePopup),
-  );
-
-  return cachePopup;
-}
-
-// Save momentos to localStorage
-function saveGame() {
-  localStorage.setItem(
-    "momentos",
-    JSON.stringify(Array.from(momentos.entries())),
-  );
-  localStorage.setItem("playerPath", JSON.stringify(playerPath));
-  localStorage.setItem("playerCoins", JSON.stringify(playerCoins));
-}
-
-// Load momentos from localStorage
-function loadGame() {
-  const storedMomentos = localStorage.getItem("momentos");
-  if (storedMomentos) {
-    const parsedMomentos = new Map<string, string>(JSON.parse(storedMomentos));
-    parsedMomentos.forEach((value, key) => {
-      momentos.set(key, value);
-    });
-  }
-
-  const storedPlayerPath = localStorage.getItem("playerPath");
-  if (storedPlayerPath) {
-    const parsedPlayerPath = JSON.parse(storedPlayerPath);
-    parsedPlayerPath.forEach((pos: { lat: number; lng: number }) => {
-      playerPath.push(leaflet.latLng(pos.lat, pos.lng));
-    });
-    playerPolyline.setLatLngs(playerPath);
-  }
-
-  const storedPlayerCoins = localStorage.getItem("playerCoins");
-  if (storedPlayerCoins) {
-    const parsedPlayerCoins = JSON.parse(storedPlayerCoins);
-    parsedPlayerCoins.forEach((coin: Coin) => {
-      playerCoins.push(coin);
-    });
-  }
-
-  updateDisplay(statusPanel);
-}
-
-// Update the handleDeposit and handleCollect functions to save momentos
 function handleDeposit(coinCache: CoinCache, cachePopup: HTMLElement) {
   if (playerCoins.length > 0) {
     coinCache.leaveCoin(playerCoins.pop()!);
@@ -197,7 +200,7 @@ function updateDisplay(
         const coin = playerCoins[parseInt(index)];
         const cachePosition = { x: coin.origin.x, y: coin.origin.y };
         console.log("Centering map on cache at", cachePosition);
-        centerMapOnCache(cachePosition);
+        leafletMap.centerMapOnCache(cachePosition);
       }
     });
   });
@@ -206,14 +209,6 @@ function updateDisplay(
 
   cachePopup.querySelector("#count")!.textContent =
     (coinCache.mints_remaining + coinCache.inventory.length).toString();
-}
-
-function centerMapOnCache(position: Vector2) {
-  const cacheLatLng = leaflet.latLng(
-    position.x * TILE_DEGREES,
-    position.y * TILE_DEGREES,
-  );
-  map.setView(cacheLatLng, GAMEPLAY_ZOOM_LEVEL);
 }
 
 function getOrCreateCache(position: Vector2): CoinCache {
@@ -230,22 +225,7 @@ function getOrCreateCache(position: Vector2): CoinCache {
 }
 
 function generateAroundPlayer(position: Vector2) {
-  const playerMapPos = toMapCoordinates(position);
-  cacheLayerGroup.clearLayers();
-
-  for (
-    let x = playerMapPos.x - NEIGHBORHOOD_SIZE;
-    x < playerMapPos.x + NEIGHBORHOOD_SIZE;
-    x++
-  ) {
-    for (
-      let y = playerMapPos.y - NEIGHBORHOOD_SIZE;
-      y < playerMapPos.y + NEIGHBORHOOD_SIZE;
-      y++
-    ) {
-      if (luck(`${x},${y}`) < CACHE_SPAWN_PROBABILITY) spawnCoinCache({ x, y });
-    }
-  }
+  leafletMap.generateAroundPlayer(position);
 }
 
 function toMapCoordinates(position: Vector2): Vector2 {
@@ -295,21 +275,14 @@ function enableGPS() {
 }
 
 function movePlayer(dx: number, dy: number) {
-  movePlayerToLocation(
-    playerMarker.getLatLng().lat + dy,
-    playerMarker.getLatLng().lng + dx,
-  );
+  const newLat = leafletMap.playerMarker.getLatLng().lat + dy;
+  const newLng = leafletMap.playerMarker.getLatLng().lng + dx;
+  movePlayerToLocation(newLat, newLng);
   saveGame();
 }
 
 function movePlayerToLocation(lat: number, lng: number) {
-  const newPos = leaflet.latLng(lat, lng);
-
-  playerPath.push(newPos);
-  playerPolyline.setLatLngs(playerPath);
-
-  playerMarker.setLatLng(newPos);
-  map.setView(newPos, GAMEPLAY_ZOOM_LEVEL);
+  leafletMap.movePlayerToLocation(lat, lng);
   generateAroundPlayer({ x: lat, y: lng });
 }
 
@@ -317,7 +290,7 @@ function movePlayerToLocation(lat: number, lng: number) {
 document.getElementById("reset")!.addEventListener("click", resetGame);
 
 function resetGame() {
-  //prompt user for confirmation
+  // Prompt user for confirmation
   if (!confirm("Are you sure you want to reset the game?")) return;
 
   localStorage.clear();
@@ -327,3 +300,42 @@ function resetGame() {
 ////**** Game Logic ****////
 loadGame();
 generateAroundPlayer(PLAYER_START);
+
+function saveGame() {
+  localStorage.setItem(
+    "momentos",
+    JSON.stringify(Array.from(momentos.entries())),
+  );
+  localStorage.setItem("playerCoins", JSON.stringify(playerCoins));
+  localStorage.setItem(
+    "playerPath",
+    JSON.stringify(leafletMap.playerPolyline.getLatLngs()),
+  );
+}
+
+function loadGame() {
+  const storedMomentos = localStorage.getItem("momentos");
+  if (storedMomentos) {
+    const parsedMomentos = new Map<string, string>(JSON.parse(storedMomentos));
+    parsedMomentos.forEach((value, key) => {
+      momentos.set(key, value);
+    });
+  }
+
+  const storedPlayerPath = localStorage.getItem("playerPath");
+  if (storedPlayerPath) {
+    const parsedPlayerPath = JSON.parse(storedPlayerPath);
+    leafletMap.playerPolyline.setLatLngs(parsedPlayerPath);
+  }
+
+  const storedPlayerCoins = localStorage.getItem("playerCoins");
+  if (storedPlayerCoins) {
+    playerCoins.length = 0;
+    const parsedPlayerCoins: Coin[] = JSON.parse(storedPlayerCoins);
+    parsedPlayerCoins.forEach((coin) => {
+      playerCoins.push(coin);
+    });
+    //update the display
+    updateDisplay(statusPanel);
+  }
+}
