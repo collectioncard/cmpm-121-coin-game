@@ -311,6 +311,12 @@ function saveGame() {
     "playerPath",
     JSON.stringify(leafletMap.playerPolyline.getLatLngs()),
   );
+  //Get the player location coords in a Vector2
+  const playerLocationVector = {
+    x: leafletMap.playerMarker.getLatLng().lat,
+    y: leafletMap.playerMarker.getLatLng().lng,
+  };
+  localStorage.setItem("playerLocation", JSON.stringify(playerLocationVector));
 }
 
 function loadGame() {
@@ -337,5 +343,10 @@ function loadGame() {
     });
     //update the display
     updateDisplay(statusPanel);
+  }
+
+  if (localStorage.getItem("playerLocation")) {
+    const playerLocation = JSON.parse(localStorage.getItem("playerLocation")!);
+    leafletMap.movePlayerToLocation(playerLocation.x, playerLocation.y);
   }
 }
